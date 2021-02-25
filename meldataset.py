@@ -4,9 +4,12 @@ import random
 import torch
 import torch.utils.data
 import numpy as np
+import librosa
 from librosa.util import normalize
 from scipy.io.wavfile import read
 from librosa.filters import mel as librosa_mel_fn
+# from scipy.signal import lfilter
+from torchaudio.functional import lfilter
 
 MAX_WAV_VALUE = 32768.0
 
@@ -52,6 +55,12 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
     if torch.max(y) > 1.:
         print('max value is ', torch.max(y))
 
+    # filtered = y.squeeze(0).contiguous()
+    # device = y.device
+    # y = torch.from_numpy(lfilter([1, -0.97], [1], y.cpu().numpy())).float().to(device)
+    y = torch.nn.functional.conv1d(
+        y.unsqueeze(1), torch.FloatTensor([[[-0.97, 1]]]).to(y.device), padding=1
+    ).squeeze(1)[:, :-1]
     global mel_basis, hann_window
     if fmax not in mel_basis:
         mel = librosa_mel_fn(sampling_rate, n_fft, num_mels, fmin, fmax)
@@ -74,11 +83,11 @@ def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin,
 
 def get_dataset_filelist(a):
     with open(a.input_training_file, 'r', encoding='utf-8') as fi:
-        training_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
+        training_files = [os.path.join(a.input_wavs_dir, x.split('|')[0])
                           for x in fi.read().split('\n') if len(x) > 0]
 
     with open(a.input_validation_file, 'r', encoding='utf-8') as fi:
-        validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0] + '.wav')
+        validation_files = [os.path.join(a.input_wavs_dir, x.split('|')[0])
                             for x in fi.read().split('\n') if len(x) > 0]
     return training_files, validation_files
 
@@ -115,6 +124,19 @@ class MelDataset(torch.utils.data.Dataset):
             audio = audio / MAX_WAV_VALUE
             if not self.fine_tuning:
                 audio = normalize(audio) * 0.95
+
+            # trim
+            # _, (start_frame, end_frame) = librosa.effects.trim(
+            #     audio, top_db=25, frame_length=512, hop_length=128
+            # )
+            # start_frame = max(0, start_frame - 0.1 * self.sampling_rate)
+            # end_frame = min(len(audio), end_frame + 0.1 * self.sampling_rate)
+
+            # start = int(start_frame)
+            # end = int(end_frame)
+            # if end - start > 1000:  # prevent empty slice
+            #     audio = audio[start:end]
+
             self.cached_wav = audio
             if sampling_rate != self.sampling_rate:
                 raise ValueError("{} SR doesn't match target {} SR".format(
@@ -141,7 +163,7 @@ class MelDataset(torch.utils.data.Dataset):
                                   center=False)
         else:
             mel = np.load(
-                os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + '.npy'))
+                os.path.join(self.base_mels_path, os.path.splitext(os.path.split(filename)[-1])[0] + '.npy')).T
             mel = torch.from_numpy(mel)
 
             if len(mel.shape) < 3:

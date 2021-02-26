@@ -8,8 +8,6 @@ import librosa
 from librosa.util import normalize
 from scipy.io.wavfile import read
 from librosa.filters import mel as librosa_mel_fn
-# from scipy.signal import lfilter
-from torchaudio.functional import lfilter
 
 MAX_WAV_VALUE = 32768.0
 
